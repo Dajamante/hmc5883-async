@@ -4,9 +4,21 @@ LICENSE: BSD3 (see LICENSE file)
 */
 
 #![no_std]
-#![feature(impl_trait_in_assoc_type)]
 
-use embedded_hal_async::{delay::DelayNs, i2c::I2c};
+#![cfg_attr(not(feature = "async"), deny(unstable_features))]
+#![cfg_attr(
+    feature = "async",
+    feature(impl_trait_in_assoc_type)
+)]
+
+#[cfg(feature = "sync")]
+use embedded_hal::{delay::DelayNs, i2c::I2c};
+
+#[cfg(feature = "async")]
+use embedded_hal_async::delay::DelayNs as AsyncDelayNs;
+#[cfg(feature = "async")]
+use embedded_hal_async::i2c::I2c as AsyncI2c;
+
 const I2C_ADDRESS: u8 = 0x1E;
 
 /// Errors in this crate
@@ -77,21 +89,38 @@ pub enum MeasurementModeSetting {
     /// Positive bias current
     PositiveBias = 0b01,
 }
+
+#[maybe_async_cfg::maybe(
+    sync(
+        feature = "sync",
+        self = "HMC5983"
+    ),
+    async(feature = "async", keep_self)
+)]
+
 #[derive(Debug)]
-pub struct HMC5983<I2C> {
+pub struct AsyncHMC5983<I2C> {
     i2c: I2C,
 }
 
-impl<I2C, CommE> HMC5983<I2C>
+#[maybe_async_cfg::maybe(
+    sync(
+        feature = "sync",
+        self = "HMC5983",
+        idents(AsyncInterface(sync = "Interface"), AsyncDelayNs(sync = "DelayNs"),AsyncI2c(sync = "I2c"))
+    ),
+    async(feature = "async", keep_self)
+)]
+impl<I2C, CommE> AsyncHMC5983<I2C>
 where
-    I2C: I2c<Error = CommE>,
+    I2C: AsyncI2c<Error = CommE>,
     CommE: core::fmt::Debug,
 {
     pub fn new(i2c: I2C) -> Self {
         Self { i2c }
     }
 
-    pub async fn init<D: DelayNs>(
+    pub async fn init<D: AsyncDelayNs>(
         &mut self,
         delay_source: &mut D,
     ) -> Result<(), crate::Error<CommE>> {
@@ -129,7 +158,7 @@ where
 
     async fn reset(
         &mut self,
-        delay_source: &mut impl DelayNs,
+        delay_source: &mut impl AsyncDelayNs,
     ) -> Result<(), crate::Error<CommE>> {
         //wakeup the chip
         for reg in 0x00..0x0D {
@@ -162,7 +191,8 @@ where
         // (Continuous-measurement mode)
         self.write_reg(REG_CONFIG_C, MeasurementModeSetting::NormalMode as u8)
             .await?;
-        let _ = delay_source.delay_ms(100).await;
+
+        delay_source.delay_ms(100).await;
 
         Ok(())
     }

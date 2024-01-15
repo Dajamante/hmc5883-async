@@ -4,13 +4,14 @@ LICENSE: BSD3 (see LICENSE file)
 */
 
 #![no_std]
+#![feature(impl_trait_in_assoc_type)]
 
-use defmt::{debug, Format};
-use embedded_hal_async::{delay::DelayUs, i2c::I2c};
+use embedded_hal_async::{delay::DelayNs, i2c::I2c};
 const I2C_ADDRESS: u8 = 0x1E;
 
 /// Errors in this crate
-#[derive(Debug, Format)]
+#[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error<CommE> {
     /// Sensor communication error
     Comm(CommE),
@@ -90,9 +91,9 @@ where
         Self { i2c }
     }
 
-    pub async fn init(
+    pub async fn init<D: DelayNs>(
         &mut self,
-        delay_source: &mut impl DelayUs,
+        delay_source: &mut D,
     ) -> Result<(), crate::Error<CommE>> {
         self.reset(delay_source).await
     }
@@ -128,14 +129,14 @@ where
 
     async fn reset(
         &mut self,
-        delay_source: &mut impl DelayUs,
+        delay_source: &mut impl DelayNs,
     ) -> Result<(), crate::Error<CommE>> {
         //wakeup the chip
         for reg in 0x00..0x0D {
             let _val = self.read_reg(reg).await?;
         }
 
-        const EXPECTED_PROD_ID_A: u8 = 72; //'H';
+        const EXPECTED_PROD_ID_A: u8 = 72; //\H';
         const EXPECTED_PROD_ID_B: u8 = 52; //'4';
         const EXPECTED_PROD_ID_C: u8 = 51; //'3';
                                            //compare product ID against known product ID
@@ -176,7 +177,12 @@ where
 
         let confirm_val = self.read_reg(REG_CONFIG_B).await?;
         if confirm_val != gain_val {
-            debug!("gain bad: expected {} got {}", gain_val, confirm_val);
+            #[cfg(feature = "defmt")]
+            defmt::debug!(
+                "gain bad: expected {} got {}",
+                gain_val,
+                confirm_val
+            );
             return Err(Error::Configuration);
         }
         Ok(())
@@ -243,7 +249,8 @@ where
         ];
 
         if !Self::reading_in_range(&sample_i16) {
-            debug!("bad reading?");
+            #[cfg(feature = "defmt")]
+            defmt::debug!("bad reading?");
 
             return Err(Error::OutOfRange);
         }
